@@ -11,6 +11,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.VerticalAlignmentLine
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
+import io.github.fededri.fusor.FusorState
+import io.github.fededri.fusor.FusorViewModel
 import io.github.fededri.fusor.ui.theme.FusorTheme
 import kotlinx.coroutines.*
 import kotlin.math.*
@@ -19,9 +22,10 @@ import kotlin.time.ExperimentalTime
 
 
 @Composable
-fun MainScreen() {
+fun MainScreen(viewModel: FusorViewModel) {
     var text by remember { mutableStateOf("180") }
     val scope = rememberCoroutineScope()
+    val state = viewModel.uiState
 
     Column(
         modifier = Modifier.padding(16.dp),
@@ -40,70 +44,129 @@ fun MainScreen() {
             Spacer(Modifier.size(16.dp))
         }
 
-        Row() {
-            Spacer(modifier = Modifier.fillMaxWidth(0.3f))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
             Button(
-                modifier = Modifier.fillMaxWidth(0.4f),
-                onClick = { startSimulation(text.toIntOrNull(), scope) }) {
+                onClick = { startSimulation(text.toIntOrNull(), scope, viewModel) }) {
                 Text(text = "Iniciar simulación")
             }
 
-            Spacer(modifier = Modifier.fillMaxWidth(0.3f))
+            Button(
+                onClick = { scope.cancel() }) {
+                Text(text = "Parar simulación")
+            }
+
+            Button(
+                onClick = { viewModel.uiState = FusorState() }) {
+                Text(text = "Reset")
+            }
         }
 
+        DataView(state)
     }
 }
 
-private fun startSimulation(reference: Int?, scope: CoroutineScope) {
+@Composable
+fun DataView(state: FusorState) {
+    Column() {
+        Row() {
+            Text(text = "Temperatura:")
+            Text(
+                text = state.temperature.toString(),
+                modifier = Modifier.padding(horizontal = 8.dp)
+            )
+        }
+
+        Row() {
+            Text(text = "Señal de error:")
+            Text(
+                text = state.errorSignal.toString(),
+                modifier = Modifier.padding(horizontal = 8.dp)
+            )
+        }
+
+        Row() {
+            Text(text = "Error acumulado:")
+            Text(
+                text = state.cumulativeError.toString(),
+                modifier = Modifier.padding(horizontal = 8.dp)
+            )
+        }
+    }
+
+}
+
+private fun startSimulation(reference: Int?, scope: CoroutineScope, viewModel: FusorViewModel) {
     check(reference != null)
 
     // Ganancia arduino (Amper)
-    val current = reference * 0.02f
+    var current: Float
 
     //Calentador
-    heatUp(current = current, scope = scope, reference = reference)
-}
-
-@OptIn(ExperimentalTime::class)
-private fun heatUp(current: Float, scope: CoroutineScope, reference: Int) {
-    val resistance = 200 // Ohms
-
     var t = 0L // seconds
-    val mass = 20// gr
-    val C = 1500
+
     val ambientTemperature = 20f
-    val speedMultiplier = 25
+    val speedMultiplier = 1
     var errorSignal = 0f
     var plaTemperature = ambientTemperature
     var cumError = 0f
+    val ki = 0.003f
 
     scope.launch {
         while (true) {
-            val start = System.nanoTime()
-            if (errorSignal > 0) {
-                // Heat up
-                val heat = current.pow(2) * resistance * (t*speedMultiplier)
-                plaTemperature = (heat / (mass * C)) + ambientTemperature
-                t += 1
-            } else {
-                // cool down
-                plaTemperature -= 1
-                t -= 1
-            }
+            val start = System.currentTimeMillis()
+            current = cumError
 
-            delay(Duration.Companion.seconds(1))
-
-            Log.i("Temperature:", plaTemperature.toString())
+            advanceTime(1)
+            t += 1
 
             // Read temperature
+            plaTemperature = getTemperature(current, t, speedMultiplier)
             errorSignal = getErrorSignal(reference, plaTemperature)
-            val ellapsedTime = System.nanoTime() - start
-            cumError += errorSignal * ellapsedTime
+            val ellapsedTime = System.currentTimeMillis() - start
+            cumError += ki * errorSignal * (ellapsedTime / 1000f)
+            viewModel.uiState = FusorState(
+                temperature = plaTemperature,
+                errorSignal = errorSignal,
+                cumulativeError = cumError
+            )
+            Log.i("Temperature:", plaTemperature.toString())
             Log.i("Error Signal:", errorSignal.toString())
             Log.i("cumError:", cumError.toString())
+            Log.i("---------------------", "")
         }
     }
 }
+
+fun getTemperature(
+    current: Float,
+    currentTime: Long,
+    speedMultiplier: Int
+): Float {
+    val resistance = 200 // Ohms
+    val heat = getHeat(current, resistance, currentTime, speedMultiplier)
+    val mass = 20// gr
+    val C = 500
+    val ambientTemperature = 20
+    return (heat / (mass * C)) + ambientTemperature
+}
+
+@OptIn(ExperimentalTime::class)
+suspend fun advanceTime(seconds: Int) {
+    delay(Duration.Companion.seconds(seconds))
+}
+
+private fun getHeat(
+    current: Float,
+    resistance: Int,
+    currentTime: Long,
+    speedMultiplier: Int
+): Float {
+    return current.pow(2) * resistance * (currentTime * speedMultiplier)
+}
+
 
 private fun getErrorSignal(reference: Int, sensorValue: Float): Float {
     return reference - sensorValue
@@ -113,6 +176,6 @@ private fun getErrorSignal(reference: Int, sensorValue: Float): Float {
 @Composable
 fun DefaultPreview() {
     FusorTheme {
-        MainScreen()
+        MainScreen(FusorViewModel())
     }
 }

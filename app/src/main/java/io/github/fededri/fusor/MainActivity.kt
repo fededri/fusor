@@ -10,10 +10,15 @@ import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.lifecycle.ViewModelProvider
 import io.github.fededri.fusor.ui.MainScreen
 import io.github.fededri.fusor.ui.theme.FusorTheme
 
 class MainActivity : ComponentActivity() {
+    private val viewModel: FusorViewModel by lazy {
+        ViewModelProvider(this).get(FusorViewModel::class.java)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -23,7 +28,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colors.background
                 ) {
-                    MainScreen()
+                    MainScreen(viewModel)
                 }
             }
         }
@@ -36,6 +41,6 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun DefaultPreview() {
     FusorTheme {
-        MainScreen()
+        MainScreen(FusorViewModel())
     }
 }
